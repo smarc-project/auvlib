@@ -9,25 +9,34 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <bathy_maps/draw_map.h>
-#include <bathy_maps/mesh_map.h>
+#include <bathy_maps/sss_gen_sim.h>
+#include <bathy_maps/base_draper.h>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/eigen.h>
 #include <pybind11/stl.h>
+#include <pybind11/functional.h>
+
+using namespace std_data;
+using namespace xtf_data;
+using namespace csv_data;
 
 namespace py = pybind11;
 
-PYBIND11_MODULE(mesh_map, m) {
-    m.doc() = "Data structure for constructing and viewing a bathymetry mesh and for draping the mesh with sidescan data"; // optional module docstring
-    //py::class_<bathy_map_mesh>(m, "bathy_map_mesh", "Class for constructing mesh from multibeam data")
-    //.def(py::init<>(), "Constructor")
-    m.def("mesh_from_height_map", &mesh_map::mesh_from_height_map, "Construct mesh from height map");
-    m.def("height_map_from_pings", &mesh_map::height_map_from_pings, "Construct height map from mbes_ping::PingsT");
-    m.def("mesh_from_pings", &mesh_map::mesh_from_pings, "Construct mesh from mbes_ping::PingsT");
-    m.def("show_mesh", &mesh_map::show_mesh, "Display mesh using igl viewer");
-    m.def("show_textured_mesh", &mesh_map::show_textured_mesh, "Display textured mesh using igl viewer");
-    m.def("show_height_map", &mesh_map::show_height_map, "Display height map using opencv");
-    m.def("height_map_to_texture", &mesh_map::height_map_to_texture, "Get R, G, B color textures from height map");
+PYBIND11_MODULE(sss_gen_sim, m) {
+    m.doc() = "Functions for simulating sidescan data from mesh"; // optional module docstring
+
+    py::class_<SSSGenSim>(m, "SSSGenSim", "Class for simulating sidescan pings from a bathymetry mesh")
+        // Methods inherited from BaseDraper:
+        .def(py::init<const Eigen::MatrixXd&, const Eigen::MatrixXi&,
+                      const xtf_sss_ping::PingsT&, const SSSGenSim::BoundsT&,
+                      const csv_asvp_sound_speed::EntriesT&, const Eigen::MatrixXd&>())
+        .def("set_sidescan_yaw", &SSSGenSim::set_sidescan_yaw, "Set yaw correction of sidescan with respect to nav frame")
+        .def("set_ray_tracing_enabled", &SSSGenSim::set_ray_tracing_enabled, "Set if ray tracing through water layers should be enabled. Takes more time but is recommended if there are large speed differences")
+        .def("set_vehicle_mesh", &SSSGenSim::set_vehicle_mesh, "Provide the viewer with a vehicle model, purely for visualization")
+        .def("show", &SSSGenSim::show, "Start the draping, and show the visualizer")
+        // Methods unique to SSSGenSim:
+        .def("set_gen_callback", &SSSGenSim::set_gen_callback, "Set the function that generates sidescan patches from bathymetry")
+        .def("set_sss_from_waterfall", &SSSGenSim::set_sss_from_waterfall, "If true, predicts sidescan from waterfall elevation image, otherwise from local bathymetry window");
 
 }
