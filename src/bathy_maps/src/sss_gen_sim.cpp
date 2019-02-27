@@ -32,7 +32,14 @@ SSSGenSim::SSSGenSim(const Eigen::MatrixXd& V1, const Eigen::MatrixXi& F1,
       height_map(height_map),
       sss_from_waterfall(false)
 {
+    resample_window_height = 32;
+    full_window_height = 64;
+
+    left_row_mean = 0.;
+    right_row_mean = 0.;
+
     viewer.callback_pre_draw = std::bind(&SSSGenSim::callback_pre_draw, this, std::placeholders::_1);
+    viewer.callback_key_pressed = std::bind(&SSSGenSim::callback_key_pressed, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
     window_point = Eigen::Vector3d::Zero();
     window_heading = 0.;
     height_map_cv = cv::Mat(height_map.rows(), height_map.cols(), CV_32FC1);
@@ -45,10 +52,25 @@ SSSGenSim::SSSGenSim(const Eigen::MatrixXd& V1, const Eigen::MatrixXi& F1,
     cout << "Nbr windows: " << nbr_windows << endl;
     waterfall_image = cv::Mat::zeros(1000, 2*nbr_windows, CV_8UC1);
     gt_waterfall_image = cv::Mat::zeros(1000, 2*nbr_windows, CV_8UC1);
+    model_waterfall_image = cv::Mat::zeros(1000, 2*nbr_windows, CV_8UC1);
     texture = Eigen::MatrixXd::Zero(20, 9*20);
 
-    waterfall_depth = Eigen::MatrixXd::Zero(32, 2*nbr_windows);
+    waterfall_depth = Eigen::MatrixXd::Zero(full_window_height, 2*nbr_windows);
+    waterfall_model = Eigen::MatrixXd::Zero(full_window_height, 2*nbr_windows);
     waterfall_row = 0;
+}
+
+bool SSSGenSim::callback_key_pressed(igl::opengl::glfw::Viewer& viewer, unsigned int key, int mods)
+{
+    switch (key) {
+    case 'n':
+        while (i < pings.size() && !pings[i].first_in_file_) {
+            ++i;
+        }
+        return true;
+    default:
+        return false;
+    }
 }
 
 Eigen::MatrixXd scale_height_map(const Eigen::MatrixXd& height_map)
@@ -164,30 +186,6 @@ void SSSGenSim::generate_sss_window()
 
 }
 
-pair<Eigen::MatrixXd, Eigen::MatrixXd> SSSGenSim::project()
-{
-    cout << "Setting new position: " << pings[i].pos_.transpose() << endl;
-    Eigen::Matrix3d Rcomp = Eigen::AngleAxisd(sensor_yaw, Eigen::Vector3d::UnitZ()).matrix();
-    Eigen::Matrix3d Ry = Eigen::AngleAxisd(pings[i].pitch_, Eigen::Vector3d::UnitY()).matrix();
-    Eigen::Matrix3d Rz = Eigen::AngleAxisd(pings[i].heading_, Eigen::Vector3d::UnitZ()).matrix();
-    Eigen::Matrix3d R = Rz*Ry*Rcomp;
-
-    Eigen::MatrixXd hits_left;
-    Eigen::MatrixXd hits_right;
-    Eigen::VectorXi hits_left_inds;
-    Eigen::VectorXi hits_right_inds;
-    Eigen::VectorXd mod_left;
-    Eigen::VectorXd mod_right;
-
-    auto start = chrono::high_resolution_clock::now();
-    tie(hits_left, hits_right, hits_left_inds, hits_right_inds, mod_left, mod_right) = embree_compute_hits(pings[i].pos_ - offset, R, 1.4*pings[i].port.tilt_angle, pings[i].port.beam_width, V1, F1);
-    auto stop = chrono::high_resolution_clock::now();
-    auto duration = chrono::duration_cast<chrono::microseconds>(stop - start);
-    cout << "embree_compute_hits time: " << duration.count() << " microseconds" << endl;
-
-    return make_pair(hits_left, hits_right);
-}
-
 Eigen::MatrixXd SSSGenSim::get_UV(const Eigen::MatrixXd& P)
 {
     double resolution = double(height_map_cv.cols)/(bounds(1, 0) - bounds(0, 0));
@@ -221,97 +219,14 @@ Eigen::VectorXd SSSGenSim::get_texture_intensities(const Eigen::MatrixXd& P)
     return intensities;
 }
 
-Eigen::VectorXd SSSGenSim::compute_times(const Eigen::MatrixXd& P)
-{
-    Eigen::Vector3d pos = pings[i].pos_ - offset;
-    double sound_vel = sound_speeds[0].vels.head(sound_speeds[0].vels.rows()-1).mean();
-    Eigen::VectorXd times = 2.*(P.rowwise() - pos.transpose()).rowwise().norm()/sound_vel;
-    return times;
-}
-
-Eigen::VectorXd SSSGenSim::compute_time_windows(const Eigen::VectorXd& times, const Eigen::VectorXd& intensities, const xtf_data::xtf_sss_ping_side& ping)
-{
-    double ping_step = ping.time_duration / double(nbr_windows);
-    Eigen::VectorXd time_windows = Eigen::VectorXd::Zero(nbr_windows);
-    Eigen::VectorXd time_counts = Eigen::VectorXd::Zero(nbr_windows);
-    for (int i = 0; i < times.rows(); ++i) {
-        int index = int(times(i)/ping_step);
-        if (index < nbr_windows) {
-            time_windows(index) += intensities(i);
-            time_counts(index) += 1.;
-        }
-    }
-    time_windows.array() /= time_counts.array();
-    return time_windows;
-}
-
-Eigen::VectorXd SSSGenSim::compute_depth_windows(const Eigen::VectorXd& times, const Eigen::MatrixXd& hits, const xtf_data::xtf_sss_ping_side& ping)
-{
-    double ping_step = ping.time_duration / double(nbr_windows);
-    Eigen::VectorXd depth_windows = Eigen::VectorXd::Zero(nbr_windows);
-    Eigen::VectorXd depth_counts = Eigen::VectorXd::Zero(nbr_windows);
-    for (int i = 0; i < times.rows(); ++i) {
-        int index = int(times(i)/ping_step);
-        if (index < nbr_windows) {
-            depth_windows(index) += hits(i, 2);
-            depth_counts(index) += 1.;
-        }
-    }
-    depth_windows.array() /= depth_counts.array();
-    return depth_windows;
-}
-
-/*
-Eigen::VectorXd SSSGenSim::match_intensities(const Eigen::VectorXd& times, const xtf_data::xtf_sss_ping_side& ping)
-{
-    double ping_step = ping.time_duration / double(nbr_windows);
-    Eigen::VectorXd time_windows = Eigen::VectorXd::Zero(nbr_windows);
-    Eigen::VectorXd time_counts = Eigen::VectorXd::Zero(nbr_windows);
-    for (int i = 0; i < times.rows(); ++i) {
-        int index = int(times(i)/ping_step);
-        if (index < nbr_windows) {
-            time_windows(index) += intensities(i);
-            time_counts(index) += 1.;
-        }
-    }
-    time_windows.array() /= time_counts.array();
-    return time_windows;
-}
-*/
-
-void SSSGenSim::visualize_rays(const Eigen::MatrixXd& hits_left, const Eigen::MatrixXd& hits_right)
-{
-    Eigen::MatrixXi E;
-    Eigen::MatrixXd P(hits_left.rows(), 3);
-    P.rowwise() = (pings[i].pos_ - offset).transpose();
-    viewer.data().set_edges(P, E, Eigen::RowVector3d(1., 0., 0.));
-    viewer.data().add_edges(P, hits_left, Eigen::RowVector3d(1., 0., 0.));
-    P = Eigen::MatrixXd(hits_right.rows(), 3);
-    P.rowwise() = (pings[i].pos_ - offset).transpose();
-    viewer.data().add_edges(P, hits_right, Eigen::RowVector3d(0., 1., 0.));
-}
-
-void SSSGenSim::visualize_vehicle()
-{
-    if (V2.rows() == 0) {
-        return;
-    }
-    Eigen::Matrix3d Rcomp = Eigen::AngleAxisd(sensor_yaw, Eigen::Vector3d::UnitZ()).matrix();
-    Eigen::Matrix3d Ry = Eigen::AngleAxisd(pings[i].pitch_, Eigen::Vector3d::UnitY()).matrix();
-    Eigen::Matrix3d Rz = Eigen::AngleAxisd(pings[i].heading_, Eigen::Vector3d::UnitZ()).matrix();
-    Eigen::Matrix3d R = Rz*Ry*Rcomp;
-
-    V.bottomRows(V2.rows()) = V2;
-    V.bottomRows(V2.rows()) *= R.transpose();
-    V.bottomRows(V2.rows()).array().rowwise() += (pings[i].pos_ - offset).transpose().array();
-    viewer.data().set_vertices(V);
-}
-
 void SSSGenSim::construct_gt_waterfall()
 {
     cv::Mat shifted = cv::Mat::zeros(waterfall_image.rows, waterfall_image.cols, waterfall_image.type());
     gt_waterfall_image(cv::Rect(0, 0, waterfall_image.cols, waterfall_image.rows-1)).copyTo(shifted(cv::Rect(0, 1, shifted.cols, shifted.rows-1)));
     shifted.copyTo(gt_waterfall_image);
+
+    Eigen::ArrayXd values = Eigen::ArrayXd::Zero(2*nbr_windows);
+    Eigen::ArrayXd value_counts = Eigen::ArrayXd::Zero(2*nbr_windows);
 
     double ping_step = double(pings[i].port.pings.size())/double(nbr_windows);
     for (int j = 0; j < pings[i].port.pings.size(); ++j) {
@@ -322,12 +237,51 @@ void SSSGenSim::construct_gt_waterfall()
         int right_index = nbr_windows+int(double(j)/ping_step);
 
         if (left_index > 0) {
-            gt_waterfall_image.at<uint8_t>(0, left_index) = uint8_t(255.*left_intensity);
+            values(left_index) += left_intensity;
+            value_counts(left_index) += 1.;
+            //gt_waterfall_image.at<uint8_t>(0, left_index) = uint8_t(255.*left_intensity);
         }
         if (right_index < 2*nbr_windows) {
-            gt_waterfall_image.at<uint8_t>(0, right_index) = uint8_t(255.*right_intensity);
+            values(right_index) += right_intensity;
+            value_counts(right_index) += 1.;
+            //gt_waterfall_image.at<uint8_t>(0, right_index) = uint8_t(255.*right_intensity);
         }
 
+    }
+    value_counts += (value_counts == 0).cast<double>();
+    values /= value_counts;
+
+    for (int j = 0; j < 2*nbr_windows; ++j) {
+        gt_waterfall_image.at<uint8_t>(0, j) = uint8_t(255.*values(j));
+    }
+}
+
+void SSSGenSim::construct_model_waterfall(const Eigen::MatrixXd& hits_left, const Eigen::MatrixXd& hits_right,
+                                          const Eigen::MatrixXd& normals_left, const Eigen::MatrixXd& normals_right,
+                                          const Eigen::VectorXd& times_left, const Eigen::VectorXd& times_right)
+{
+    cv::Mat shifted = cv::Mat::zeros(waterfall_image.rows, waterfall_image.cols, waterfall_image.type());
+    model_waterfall_image(cv::Rect(0, 0, waterfall_image.cols, waterfall_image.rows-1)).copyTo(shifted(cv::Rect(0, 1, shifted.cols, shifted.rows-1)));
+    shifted.copyTo(model_waterfall_image);
+
+    Eigen::Vector3d pos = pings[i].pos_ - offset;
+
+    Eigen::VectorXd intensities_left = compute_model_intensities(hits_left, normals_left, pos);
+    Eigen::VectorXd intensities_right = compute_model_intensities(hits_right, normals_right, pos);
+
+    double ping_step = pings[i].port.time_duration / double(nbr_windows);
+    for (int j = 0; j < times_left.rows(); ++j) {
+        int index = int(times_left(j)/ping_step);
+        if (index < nbr_windows) {
+            model_waterfall_image.at<uint8_t>(0, nbr_windows-index-1) = uint8_t(255.*intensities_left(j));
+        }
+    }
+
+    for (int j = 0; j < times_right.rows(); ++j) {
+        int index = int(times_right(j)/ping_step);
+        if (index < nbr_windows) {
+            model_waterfall_image.at<uint8_t>(0, nbr_windows+index) = uint8_t(255.*intensities_right(j));
+        }
     }
 }
 
@@ -338,12 +292,31 @@ bool SSSGenSim::callback_pre_draw(igl::opengl::glfw::Viewer& viewer)
     }
 
     if (sss_from_waterfall) {
-        if (waterfall_row == 32) {
-            Eigen::MatrixXd generated = gen_callback(waterfall_depth);
-            for (int row = 0; row < 32; ++row) {
-                for (int col = 0; col < generated.cols(); ++col) {
-                    waterfall_image.at<uint8_t>(row, col) = uint8_t(255.*generated(row, col));
+        if (waterfall_row == resample_window_height) {
+            //Eigen::MatrixXd generated = gen_callback(waterfall_depth);
+            Eigen::MatrixXd generated = gen_callback(waterfall_model);
+
+            double left_bottom_row_mean = generated.row(resample_window_height-1).head(generated.cols()/2).mean();
+            double right_bottom_row_mean = generated.row(resample_window_height-1).tail(generated.cols()/2).mean();
+            for (int row = 0; row < resample_window_height; ++row) {
+                for (int col = 0; col < generated.cols()/2; ++col) {
+                    double correction = 1./double(resample_window_height)*(double(resample_window_height - row) + double(row)*left_row_mean/left_bottom_row_mean);
+                    waterfall_image.at<uint8_t>(row, col) = uint8_t(255.*correction*generated(row, col));
                 }
+                for (int col = generated.cols()/2; col < generated.cols(); ++col) {
+                    double correction = 1./double(resample_window_height)*(double(resample_window_height - row) + double(row)*right_row_mean/right_bottom_row_mean);
+                    waterfall_image.at<uint8_t>(row, col) = uint8_t(255.*correction*generated(row, col));
+                }
+            }
+            left_row_mean = generated.row(0).head(generated.cols()/2).mean();
+            right_row_mean = generated.row(0).tail(generated.cols()/2).mean();
+            if (full_window_height > resample_window_height) {
+                Eigen::MatrixXd temp = waterfall_depth.topRows(full_window_height-resample_window_height);
+                waterfall_depth.bottomRows(full_window_height-resample_window_height) = temp;
+                waterfall_depth.topRows(resample_window_height).setZero();
+                temp = waterfall_model.topRows(full_window_height-resample_window_height);
+                waterfall_model.bottomRows(full_window_height-resample_window_height) = temp;
+                waterfall_model.topRows(resample_window_height).setZero();
             }
             waterfall_row = 0;
         }
@@ -356,27 +329,44 @@ bool SSSGenSim::callback_pre_draw(igl::opengl::glfw::Viewer& viewer)
         }
     }
 
+    // compute 3d hits and normals
     Eigen::MatrixXd hits_left;
     Eigen::MatrixXd hits_right;
-    tie(hits_left, hits_right) = project();
+    Eigen::MatrixXd normals_left;
+    Eigen::MatrixXd normals_right;
+    tie(hits_left, hits_right, normals_left, normals_right) = project();
 
+    // compute travel times
     Eigen::VectorXd times_left = compute_times(hits_left);
     Eigen::VectorXd times_right = compute_times(hits_right);
 
+    // shift the waterfall image
     cv::Mat shifted = cv::Mat::zeros(waterfall_image.rows, waterfall_image.cols, waterfall_image.type());
     waterfall_image(cv::Rect(0, 0, waterfall_image.cols, waterfall_image.rows-1)).copyTo(shifted(cv::Rect(0, 1, shifted.cols, shifted.rows-1)));
     shifted.copyTo(waterfall_image);
 
     if (sss_from_waterfall) {
+    
+        Eigen::Vector3d pos = pings[i].pos_ - offset;
 
-        Eigen::VectorXd depth_windows_left = compute_depth_windows(times_left, hits_left, pings[i].port);
-        Eigen::VectorXd depth_windows_right = compute_depth_windows(times_right, hits_right, pings[i].stbd);
+        // maybe do this outside the statement and reuse them for the cv image generation
+        Eigen::VectorXd model_windows_left = convert_to_time_bins(times_left, compute_model_intensities(hits_left, normals_left, pos), pings[i].port, nbr_windows);
+        Eigen::VectorXd model_windows_right = convert_to_time_bins(times_right, compute_model_intensities(hits_right, normals_right, pos), pings[i].stbd, nbr_windows);
+
+        Eigen::VectorXd model_windows(model_windows_left.rows() + model_windows_right.rows());
+        model_windows.tail(model_windows_right.rows()) = model_windows_right;
+        model_windows.head(model_windows_left.rows()) = model_windows_left.reverse();
+
+        waterfall_model.row(resample_window_height-waterfall_row-1) = model_windows.transpose();
+
+        Eigen::VectorXd depth_windows_left = convert_to_time_bins(times_left, hits_left.col(2), pings[i].port, nbr_windows);
+        Eigen::VectorXd depth_windows_right = convert_to_time_bins(times_right, hits_right.col(2), pings[i].stbd, nbr_windows);
 
         Eigen::VectorXd depth_windows(depth_windows_left.rows() + depth_windows_right.rows());
         depth_windows.tail(depth_windows_right.rows()) = depth_windows_right;
         depth_windows.head(depth_windows_left.rows()) = depth_windows_left.reverse();
 
-        waterfall_depth.row(32-waterfall_row-1) = depth_windows.transpose();
+        waterfall_depth.row(resample_window_height-waterfall_row-1) = depth_windows.transpose();
         ++waterfall_row;
 
     }
@@ -385,8 +375,8 @@ bool SSSGenSim::callback_pre_draw(igl::opengl::glfw::Viewer& viewer)
         Eigen::VectorXd intensities_left = get_texture_intensities(hits_left);
         Eigen::VectorXd intensities_right = get_texture_intensities(hits_right);
 
-        Eigen::VectorXd time_windows_left = compute_time_windows(times_left, intensities_left, pings[i].port);
-        Eigen::VectorXd time_windows_right = compute_time_windows(times_right, intensities_right, pings[i].stbd);
+        Eigen::VectorXd time_windows_left = convert_to_time_bins(times_left, intensities_left, pings[i].port, nbr_windows);
+        Eigen::VectorXd time_windows_right = convert_to_time_bins(times_right, intensities_right, pings[i].stbd, nbr_windows);
 
         Eigen::VectorXd time_windows(time_windows_left.rows() + time_windows_right.rows());
         time_windows.tail(time_windows_right.rows()) = time_windows_right;
@@ -398,11 +388,17 @@ bool SSSGenSim::callback_pre_draw(igl::opengl::glfw::Viewer& viewer)
 
     }
 
+    // construct the ground truth waterfall image for timestep
     construct_gt_waterfall();
 
-    cv::imshow("Waterfall image", waterfall_image);
+    // construct the model waterfall image for timestep
+    construct_model_waterfall(hits_left, hits_right, normals_left, normals_right, times_left, times_right);
+
+    cv::imshow("GAN waterfall image", waterfall_image);
 
     cv::imshow("Ground truth waterfall image", gt_waterfall_image);
+
+    cv::imshow("Model waterfall image", model_waterfall_image);
 
     cv::waitKey(10);
 

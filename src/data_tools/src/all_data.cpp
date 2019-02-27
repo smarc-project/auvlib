@@ -178,6 +178,7 @@ vector<ReturnType, Eigen::aligned_allocator<ReturnType> > parse_file_impl(const 
 		    input.read(reinterpret_cast<char*>(&end_ident), sizeof(end_ident));
 		    input.read(reinterpret_cast<char*>(&checksum), sizeof(checksum));
 			//cout << "End identifier: " << end_ident << endl;
+            returns.back().first_in_file_ = false;
 		}
 		else {
 		    //cout << "No MB reading, code: " << int(data_type) << endl;
@@ -188,10 +189,14 @@ vector<ReturnType, Eigen::aligned_allocator<ReturnType> > parse_file_impl(const 
 
     /*
     for (int i = 0; i < 255; ++i) {
-        cout << std::dec << "Got " << counters[i] << " of type " << i << std::hex <<"with hex 0x"<< i << endl;
+        cout << std::dec << "Got " << counters[i] << " of type " << i << std::hex <<" with hex 0x"<< i << std::dec << endl;
     }
 	cout << "Got " << pos_counter << " position entries" << endl;
     */
+
+    if (!returns.empty()) {
+        returns[0].first_in_file_ = true;
+    }
 
 	return returns;
 }
@@ -205,7 +210,11 @@ pair<long long, string> parse_all_time(unsigned int date, unsigned int time)
     //std::istringstream is(to_string(date));
     //cout << "Date: " << to_string(date) << endl;
     //is.imbue(loc);
-    boost::gregorian::date date_t = boost::gregorian::date_from_iso_string(to_string(date));
+    string date_string = to_string(date);
+    /*if (date_string.size() != 8) {
+        return make_pair(0, "1970-01-01 00:00:00.000");
+    }*/
+    boost::gregorian::date date_t = boost::gregorian::date_from_iso_string(date_string);
     boost::posix_time::ptime t(date_t, time_d);
     //is >> date_t;
     long long time_stamp_ = (t - epoch).total_milliseconds();
@@ -296,6 +305,33 @@ all_nav_depth read_datagram<all_nav_depth, all_depth_datagram>(std::ifstream& in
 }
 
 template <>
+all_nav_attitude read_datagram<all_nav_attitude, all_attitude_datagram>(std::ifstream& input, const all_attitude_datagram& header)
+{
+	all_nav_attitude entry;
+	entry.id_ = header.attitude_count;
+    tie(entry.time_stamp_, entry.time_string_) = parse_all_time(header.date, header.time);
+
+    all_nav_attitude_sample sample;
+	all_attitude_datagram_repeat meas;
+
+    entry.samples.reserve(header.nbr_entries);
+	for (int i = 0; i < header.nbr_entries; ++i) {
+		input.read(reinterpret_cast<char*>(&meas), sizeof(meas));
+        sample.ms_since_start = meas.ms_since_start;
+        sample.pitch = M_PI/180.*0.01*double(meas.pitch);
+        sample.roll = M_PI/180.*0.01*double(meas.roll);
+        sample.heading = M_PI/180.*0.01*double(meas.heading);
+        sample.heave = 0.01*double(meas.heave);
+        entry.samples.push_back(sample);
+	}
+    
+	unsigned char system_desc; // Sensor system descriptor 1U
+	input.read(reinterpret_cast<char*>(&system_desc), sizeof(system_desc));
+	
+    return entry;
+}
+
+template <>
 all_echosounder_depth read_datagram<all_echosounder_depth, all_echosounder_depth_datagram>(std::ifstream& input, const all_echosounder_depth_datagram& header)
 {
 	all_echosounder_depth entry;
@@ -310,6 +346,7 @@ all_echosounder_depth read_datagram<all_echosounder_depth, all_echosounder_depth
 mbes_ping::PingsT convert_matched_entries(all_mbes_ping::PingsT& pings, all_nav_entry::EntriesT& entries)
 {
     mbes_ping::PingsT new_pings;
+    new_pings.reserve(pings.size());
 
     std::stable_sort(entries.begin(), entries.end(), [](const all_nav_entry& entry1, const all_nav_entry& entry2) {
         return entry1.time_stamp_ < entry2.time_stamp_;
@@ -360,6 +397,8 @@ mbes_ping::PingsT convert_matched_entries(all_mbes_ping::PingsT& pings, all_nav_
             }
         }
 
+        new_ping.beams.reserve(ping.beams.size());
+        new_ping.back_scatter.reserve(ping.beams.size());
         int i = 0;
         //cout << "Ping heading: " << new_ping.heading_ << endl;
         for (const Eigen::Vector3d& beam : ping.beams) {
@@ -377,6 +416,79 @@ mbes_ping::PingsT convert_matched_entries(all_mbes_ping::PingsT& pings, all_nav_
         }
 
         new_pings.push_back(new_ping);
+    }
+
+    return new_pings;
+}
+
+mbes_ping::PingsT match_attitude(mbes_ping::PingsT& pings, all_nav_attitude::EntriesT& entries)
+{
+    struct unfolded_attitude {
+        long long time_stamp_; // posix time stamp
+        double roll;
+        double pitch;
+        double heading;
+        double heave;
+    };
+
+    vector<unfolded_attitude> attitudes;
+    unfolded_attitude attitude;
+    for (const all_nav_attitude& entry : entries) {
+        for (const all_nav_attitude_sample& sample : entry.samples) {
+            attitude.roll = sample.roll;
+            attitude.pitch = sample.pitch;
+            attitude.heading = sample.heading;
+            attitude.heave = sample.heave;
+            attitude.time_stamp_ = entry.time_stamp_ + sample.ms_since_start;
+            attitudes.push_back(attitude);
+        }
+    }
+
+    mbes_ping::PingsT new_pings = pings;
+
+    std::stable_sort(entries.begin(), entries.end(), [](const all_nav_attitude& entry1, const all_nav_attitude& entry2) {
+        return entry1.time_stamp_ < entry2.time_stamp_;
+    });
+
+    auto pos = attitudes.begin();
+    for (mbes_ping& ping : new_pings) {
+        pos = std::find_if(pos, attitudes.end(), [&](const unfolded_attitude& entry) {
+            return entry.time_stamp_ > ping.time_stamp_;
+        });
+
+        ping.pitch_ = 0.;
+        ping.roll_ = 0.;
+        double heave;
+        if (pos == attitudes.end()) {
+            ping.pitch_ = attitudes.back().pitch;
+            ping.roll_ = attitudes.back().roll;
+            heave = attitudes.back().heave;
+        }
+        else if (pos == attitudes.begin()) {
+                ping.pitch_ = pos->pitch;
+                ping.roll_ = pos->roll;
+                heave = pos->heave;
+        }
+        else {
+            unfolded_attitude& previous = *(pos - 1);
+            double ratio = double(ping.time_stamp_ - previous.time_stamp_)/double(pos->time_stamp_ - previous.time_stamp_);
+            ping.pitch_ = previous.pitch + ratio*(pos->pitch - previous.pitch);
+            ping.roll_ = previous.roll + ratio*(pos->roll - previous.roll);
+            heave = previous.heave + ratio*(pos->heave - previous.heave);
+        }
+        //ping.pitch_ *= -1.;
+        //ping.roll_ *= -1.;
+        
+        for (Eigen::Vector3d& beam : ping.beams) {
+            beam = beam - ping.pos_;
+            Eigen::Matrix3d Rz = Eigen::AngleAxisd(-ping.heading_, Eigen::Vector3d::UnitZ()).matrix();
+            beam = Rz*beam;
+            Rz = Eigen::AngleAxisd(ping.heading_, Eigen::Vector3d::UnitZ()).matrix();
+            Eigen::Matrix3d Ry = Eigen::AngleAxisd(0.*1.*ping.pitch_, Eigen::Vector3d::UnitY()).matrix();
+            Eigen::Matrix3d Rx = Eigen::AngleAxisd(0.*1.*ping.roll_, Eigen::Vector3d::UnitX()).matrix();
+            Eigen::Matrix3d R = Rx*Ry*Rz;
+            beam = ping.pos_ + R*beam; // + Eigen::Vector3d(0., 0., -heave);
+        }
     }
 
     return new_pings;
@@ -404,6 +516,12 @@ template <>
 all_nav_depth::EntriesT parse_file<all_nav_depth>(const boost::filesystem::path& path)
 {
     return parse_file_impl<all_nav_depth, all_depth_datagram, 104>(path);
+}
+
+template <>
+all_nav_attitude::EntriesT parse_file<all_nav_attitude>(const boost::filesystem::path& path)
+{
+    return parse_file_impl<all_nav_attitude, all_attitude_datagram, 65>(path);
 }
 
 template <>

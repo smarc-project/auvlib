@@ -9,34 +9,24 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef DRAW_MAP_H
-#define DRAW_MAP_H
+#include <data_tools/xyz_data.h>
 
-#include <data_tools/std_data.h>
-#define BOOST_NO_CXX11_SCOPED_ENUMS
-#include <boost/filesystem.hpp>
-#undef BOOST_NO_CXX11_SCOPED_ENUMS
-#include <opencv2/core/core.hpp>
+#include <pybind11/pybind11.h>
+#include <pybind11/eigen.h>
+#include <pybind11/stl.h>
 
-class BathyMapImage {
-public:
-    using TargetsT = std::map<std::string, std::pair<double, double> >;
+using namespace std_data;
 
-    cv::Mat bathy_map;
-    // res, xmin, ymin, imxmin, imymin
-    std::array<double, 5> params;
-    int rows, cols;
+namespace py = pybind11;
 
-    BathyMapImage(std_data::mbes_ping::PingsT& pings, int rows=500, int cols=500);
-    void draw_track(std_data::mbes_ping::PingsT& pings);
-    void draw_track(std_data::mbes_ping::PingsT& pings, const cv::Scalar& color);
-    void draw_height_map(std_data::mbes_ping::PingsT& pings);
-    void draw_back_scatter_map(std_data::mbes_ping::PingsT& pings);
-    void draw_targets(const TargetsT& targets, const cv::Scalar& color);
-    void draw_indices(std_data::mbes_ping::PingsT& pings, int skip_indices=500);
-    void write_image(const boost::filesystem::path& path);
-    void write_image_from_str(const std::string& path);
-    void show();
-};
+PYBIND11_MODULE(xyz_data, m) {
+    m.doc() = "Basic utilities for working with the xyz file format"; // optional module docstring
 
-#endif // DRAW_MAP_H
+    py::class_<xyz_data::Points>(m, "cloud", "Class for xyz point cloud type")
+        .def(py::init<>())
+        .def_static("parse_file", &parse_file_from_str<Eigen::Vector3d>, "Parse xyz_data::Points from .xyz file")
+        .def_static("parse_folder", &parse_folder_from_str<Eigen::Vector3d>, "Parse xyz_data::Points from folder of .xyz files")
+        .def_static("read_data", &read_data_from_str<xyz_data::Points>, "Read xyz_data::Points from .cereal file");
+
+    m.def("write_data", &write_data_from_str<xyz_data::Points>, "Write array of Vector3d to .cereal file");
+}

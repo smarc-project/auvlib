@@ -13,6 +13,7 @@
 
 #include <igl/opengl/glfw/Viewer.h>
 #include <igl/opengl/gl.h>
+#include <igl/xml/writeDAE.h>
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
@@ -57,6 +58,16 @@ std::tuple<uint8_t, uint8_t, uint8_t> jet_mesh(double x)
     }
 
     return std::make_tuple(uint8_t(255.*r), uint8_t(255.*g), uint8_t(255.*b));
+}
+
+void write_dae_mesh(const Eigen::MatrixXd& V, const Eigen::MatrixXi& F, const boost::filesystem::path& filename)
+{
+    igl::xml::writeDAE(filename.string(), V, F);
+}
+
+void write_dae_mesh_from_str(const Eigen::MatrixXd& V, const Eigen::MatrixXi& F, const string& filename)
+{
+    write_dae_mesh(V, F, boost::filesystem::path(filename));
 }
 
 void show_mesh(const Eigen::MatrixXd& V, const Eigen::MatrixXi& F)
@@ -248,6 +259,49 @@ pair<Eigen::MatrixXd, BoundsT> height_map_from_pings(const mbes_ping::PingsT& pi
     return make_pair(means, bounds);
 }
 
+pair<Eigen::MatrixXd, BoundsT> height_map_from_cloud(const vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> >& cloud, double res)
+{
+    auto xcomp = [](const Eigen::Vector3d& p1, const Eigen::Vector3d& p2) {
+        return p1[0] < p2[0];
+    };
+    auto ycomp = [](const Eigen::Vector3d& p1, const Eigen::Vector3d& p2) {
+        return p1[1] < p2[1];
+    };
+    double maxx = std::max_element(cloud.begin(), cloud.end(), xcomp)->x();
+    double minx = std::min_element(cloud.begin(), cloud.end(), xcomp)->x();
+    double maxy = std::max_element(cloud.begin(), cloud.end(), ycomp)->y();
+    double miny = std::min_element(cloud.begin(), cloud.end(), ycomp)->y();
+
+    cout << "Min X: " << minx << ", Max X: " << maxx << ", Min Y: " << miny << ", Max Y: " << maxy << endl;
+
+    int cols = std::ceil((maxx-minx)/res);
+    int rows = std::ceil((maxy-miny)/res);
+    maxx = minx + double(cols)*res;
+    maxy = miny + double(rows)*res;
+
+    cout << "Target res: " << res << endl;
+    cout << "Initial cols: " << cols << ", rows: " << rows << endl;
+
+    Eigen::MatrixXd means(rows, cols); means.setZero();
+    Eigen::MatrixXd counts(rows, cols); counts.setZero();
+
+    for (const Eigen::Vector3d& pos : cloud) {
+        int col = int((pos[0]-minx)/res);
+        int row = int((pos[1]-miny)/res);
+        if (col >= 0 && col < cols && row >= 0 && row < rows) {
+            means(row, col) += pos[2];
+            counts(row, col) += 1.;
+        }
+    }
+
+    Eigen::ArrayXXd counts_pos = counts.array() + (counts.array() == 0.).cast<double>();
+    means.array() /= counts_pos;
+
+    BoundsT bounds; bounds << minx, miny, maxx, maxy;
+
+    return make_pair(means, bounds);
+}
+
 pair<Eigen::MatrixXd, Eigen::MatrixXi> mesh_from_height_map(const Eigen::MatrixXd& height_map, const BoundsT& bounds)
 {
     // these are the bottom-left corners and top-right corners of height map respectively
@@ -299,6 +353,18 @@ tuple<Eigen::MatrixXd, Eigen::MatrixXi, BoundsT> mesh_from_pings(const mbes_ping
     Eigen::MatrixXd height_map;
     BoundsT bounds;
     tie(height_map, bounds) = height_map_from_pings(pings, res);
+    //display_height_map(height_map);
+    Eigen::MatrixXd V;
+    Eigen::MatrixXi F;
+    tie(V, F) = mesh_from_height_map(height_map, bounds);
+    return make_tuple(V, F, bounds);
+}
+
+tuple<Eigen::MatrixXd, Eigen::MatrixXi, BoundsT> mesh_from_cloud(const vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> >& cloud, double res)
+{
+    Eigen::MatrixXd height_map;
+    BoundsT bounds;
+    tie(height_map, bounds) = height_map_from_cloud(cloud, res);
     //display_height_map(height_map);
     Eigen::MatrixXd V;
     Eigen::MatrixXi F;

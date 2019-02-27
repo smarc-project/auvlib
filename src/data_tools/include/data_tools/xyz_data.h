@@ -9,34 +9,28 @@
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef DRAW_MAP_H
-#define DRAW_MAP_H
+#ifndef XYZ_DATA_H
+#define XYZ_DATA_H
 
 #include <data_tools/std_data.h>
+#include <eigen3/Eigen/Dense>
 #define BOOST_NO_CXX11_SCOPED_ENUMS
 #include <boost/filesystem.hpp>
 #undef BOOST_NO_CXX11_SCOPED_ENUMS
-#include <opencv2/core/core.hpp>
 
-class BathyMapImage {
-public:
-    using TargetsT = std::map<std::string, std::pair<double, double> >;
+namespace xyz_data {
 
-    cv::Mat bathy_map;
-    // res, xmin, ymin, imxmin, imymin
-    std::array<double, 5> params;
-    int rows, cols;
+using Points = std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> >;
 
-    BathyMapImage(std_data::mbes_ping::PingsT& pings, int rows=500, int cols=500);
-    void draw_track(std_data::mbes_ping::PingsT& pings);
-    void draw_track(std_data::mbes_ping::PingsT& pings, const cv::Scalar& color);
-    void draw_height_map(std_data::mbes_ping::PingsT& pings);
-    void draw_back_scatter_map(std_data::mbes_ping::PingsT& pings);
-    void draw_targets(const TargetsT& targets, const cv::Scalar& color);
-    void draw_indices(std_data::mbes_ping::PingsT& pings, int skip_indices=500);
-    void write_image(const boost::filesystem::path& path);
-    void write_image_from_str(const std::string& path);
-    void show();
-};
+xyz_data::Points subsample_cloud(const xyz_data::Points& cloud);
 
-#endif // DRAW_MAP_H
+} // namespace xyz_data
+
+namespace std_data {
+
+template <>
+xyz_data::Points parse_file(const boost::filesystem::path& file);
+
+}
+
+#endif // XYZ_DATA_H
