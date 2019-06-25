@@ -1,0 +1,26 @@
+language: cpp
+sudo: required
+dist: xenial
+compiler:
+    - clang
+os:
+    - linux
+before_install:
+    - echo $LANG
+    - echo $LC_ALL
+    - sudo apt-get update
+    - apt list libceres-dev -a
+    - sudo apt-get install -y libcereal-dev libglfw3-dev libceres-dev libtinyxml2-dev 
+install:
+    - git submodule update --init
+    - cd libigl
+    - git submodule update --init external/embree
+    - git submodule update --init external/glfw
+    - cd ..
+script:
+    - mkdir build && cd build
+    - cmake -DCMAKE_INSTALL_PREFIX=../install ../src
+    - make
+branches:
+    only:
+        - travis
