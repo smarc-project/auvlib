@@ -141,10 +141,10 @@ void show_mesh(const Eigen::MatrixXd& V, const Eigen::MatrixXi& F)
 
     //viewer.callback_pre_draw = std::bind(&IglVisCallback::callback_pre_draw, this, std::placeholders::_1);
     //viewer.callback_key_pressed = std::bind(&IglVisCallback::callback_key_pressed, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
-    viewer.core.is_animating = true;
-    viewer.core.animation_max_fps = 30.;
+    viewer.core().is_animating = true;
+    viewer.core().animation_max_fps = 30.;
 	//viewer.launch();
-    viewer.core.background_color << 1., 1., 1., 1.; // white background
+    viewer.core().background_color << 1., 1., 1., 1.; // white background
 	viewer.launch();
 }
 
@@ -237,10 +237,10 @@ void show_textured_mesh(const Eigen::MatrixXd& V, const Eigen::MatrixXi& F,
 
     //viewer.callback_pre_draw = std::bind(&IglVisCallback::callback_pre_draw, this, std::placeholders::_1);
     //viewer.callback_key_pressed = std::bind(&IglVisCallback::callback_key_pressed, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
-    viewer.core.is_animating = true;
-    viewer.core.animation_max_fps = 30.;
+    viewer.core().is_animating = true;
+    viewer.core().animation_max_fps = 30.;
 	//viewer.launch();
-    viewer.core.background_color << 1., 1., 1., 1.; // white background
+    viewer.core().background_color << 1., 1., 1., 1.; // white background
 	viewer.launch();
 }
 
@@ -482,6 +482,48 @@ double depth_at_point(const Eigen::MatrixXd& V, const Eigen::MatrixXi& F, const 
     igl::Hit hit;
     bool did_hit = ray_mesh_intersect(origin, Eigen::Vector3d(0., 0., -1.), V, F, hit);
     return did_hit? origin(2) - V(F(hit.id, 0), 2) : 0.;
+}
+
+Eigen::MatrixXd compute_normals(const Eigen::MatrixXd& V, const Eigen::MatrixXi& F)
+{
+    Eigen::MatrixXd N;
+    igl::per_vertex_normals(V, F, N);
+    return N;
+}
+
+tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::MatrixXd, BoundsT> mesh_and_normals_from_pings(const mbes_ping::PingsT& pings, double res)
+{
+    Eigen::MatrixXd V;
+    Eigen::MatrixXi F;
+    BoundsT bounds;
+    tie(V, F, bounds) = mesh_from_pings(pings, res);
+    cout << bounds << endl;
+
+    Eigen::MatrixXd N = compute_normals(V, F);
+    
+    return make_tuple(V, F, N, bounds);
+}
+
+Eigen::MatrixXd shade_image_from_normals(const Eigen::MatrixXd& N, const BoundsT& bounds, double res, const Eigen::Vector3d& light_dir)
+{
+    int cols = std::ceil((bounds(1, 0) - bounds(0, 0)) / res); // min/max should be in the center
+    int rows = std::ceil((bounds(1, 1) - bounds(0, 1)) / res);
+
+    cout << "Rows: " << rows << ", Cols: " << cols << endl;
+
+    Eigen::Vector3d norm_light_dir = 1./light_dir.norm()*light_dir;
+
+    Eigen::MatrixXd shade_image(rows, cols); shade_image.setZero();
+    for (int y = 0; y < rows; ++y) { // ROOM FOR SPEEDUP
+	    for (int x = 0; x < cols; ++x) {
+            int ind = y*cols+x;
+            if (!std::isnan(N(ind, 0))) {
+                shade_image(y, x) = fabs(norm_light_dir.dot(N.row(ind)));
+            }
+        }
+    }
+
+    return shade_image;
 }
 
 } // namespace mesh_map

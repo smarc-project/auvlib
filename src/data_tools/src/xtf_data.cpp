@@ -57,6 +57,25 @@ cv::Mat make_waterfall_image(const xtf_sss_ping::PingsT& pings)
     return resized_swath_img;
 }
 
+Eigen::MatrixXd make_eigen_waterfall_image(const xtf_sss_ping::PingsT& pings)
+{
+    int rows = pings.size();
+    int cols = pings[0].port.pings.size() + pings[0].stbd.pings.size();
+    //cv::Mat swath_img = cv::Mat(rows, cols, CV_8UC3, cv::Scalar(255, 255, 255));
+    Eigen::MatrixXd swath_img = Eigen::MatrixXd::Zero(rows, cols);
+    for (int i = 0; i < pings.size(); ++i) {
+        for (int j = 0; j < pings[i].port.pings.size(); ++j) {
+            //swath_img(i, pings[0].stbd.pings.size()+j) = (float(pings[i].port.pings[j]) + 32767.)/(2.*32767.);
+            swath_img(i, pings[0].stbd.pings.size()+j) = double(pings[i].port.pings[j] + 4000.)/20000.;
+        }
+        for (int j = 0; j < pings[i].stbd.pings.size(); ++j) {
+            //swath_img(i, pings[0].stbd.pings.size()-j-1) = (float(pings[i].stbd.pings[j]) + 32767.)/(2.*32767.);
+            swath_img(i, pings[0].stbd.pings.size()-j-1) = double(pings[i].stbd.pings[j] + 4000.)/20000.;
+        }
+    }
+    return swath_img;
+}
+
 void show_waterfall_image(const xtf_sss_ping::PingsT& pings)
 {
     cv::Mat waterfall_image = make_waterfall_image(pings);
@@ -170,7 +189,12 @@ xtf_sss_ping process_side_scan_ping(XTFPINGHEADER *PingHeader, XTFFILEHEADER *XT
       ping_channel->pings.reserve(SamplesPerChan);
       for (int i = 0; i < SamplesPerChan; ++i) {
           // we should get port and starboard channel from header definition
-          ping_channel->pings.push_back(Imagery[i]);
+          if (ChanHeader->Weight == 0) {
+              ping_channel->pings.push_back(Imagery[i]);
+          }
+          else {
+              ping_channel->pings.push_back(int(Imagery[i])  << (9 - ChanHeader->Weight));
+          }
       }
       ping_channel->time_duration = ChanHeader->TimeDuration;
       ping_channel->slant_range = ChanHeader->SlantRange;
@@ -186,6 +210,9 @@ xtf_sss_ping process_side_scan_ping(XTFPINGHEADER *PingHeader, XTFFILEHEADER *XT
       cout << "Slant range: " << int(ChanHeader->SlantRange) << endl;
       cout << "Time duration: " << ChanHeader->TimeDuration << endl;
       cout << "SecondsPerPing: " << ChanHeader->SecondsPerPing << endl; // seems to always be 0
+      cout << "GAIN Code: " << ChanHeader->GainCode << endl;
+      cout << "Initial GAIN Code: " << ChanHeader->InitialGainCode << endl;
+      cout << "Weight: " << ChanHeader->Weight << endl;
 
       // skip past the imagery;
       Ptr += BytesThisChannel;
@@ -331,7 +358,8 @@ xtf_sss_ping::PingsT parse_file(const boost::filesystem::path& file)
    //
    // Allocate memory for reading file data
    //
-   unsigned char* buffer = (unsigned char*)malloc((WORD)32768);
+   // NOTE: max file size is 268MB!
+   unsigned char* buffer = (unsigned char*)malloc(268435456);
    if (buffer == NULL) {
        cout << "Can't allocate memory!" << endl;
        exit(-1);

@@ -393,6 +393,7 @@ mbes_ping::PingsT convert_matched_entries(all_mbes_ping::PingsT& pings, all_nav_
                 string utm_zone;
                 tie(northing, easting, utm_zone) = lat_long_utm::lat_long_to_UTM(lat, lon);
                 new_ping.pos_ = Eigen::Vector3d(easting, northing, -ping.transducer_depth_);
+                //cout << "Filtered depth: " << depth << ", transducer depth: " << ping.transducer_depth_ << endl;
                 //new_ping.pos_ = Eigen::Vector3d(easting, northing, -depth);
             }
         }
@@ -478,20 +479,62 @@ mbes_ping::PingsT match_attitude(mbes_ping::PingsT& pings, all_nav_attitude::Ent
         }
         //ping.pitch_ *= -1.;
         //ping.roll_ *= -1.;
+
+        Eigen::Matrix3d Rz = Eigen::AngleAxisd(ping.heading_, Eigen::Vector3d::UnitZ()).matrix();
+        Eigen::Matrix3d Ry = Eigen::AngleAxisd(1.*ping.pitch_, Eigen::Vector3d::UnitY()).matrix();
+        Eigen::Matrix3d Rx = Eigen::AngleAxisd(1.*ping.roll_, Eigen::Vector3d::UnitX()).matrix();
+        Eigen::Matrix3d R = Rz*Ry;
         
         for (Eigen::Vector3d& beam : ping.beams) {
-            beam = beam - ping.pos_;
-            Eigen::Matrix3d Rz = Eigen::AngleAxisd(-ping.heading_, Eigen::Vector3d::UnitZ()).matrix();
-            beam = Rz*beam;
-            Rz = Eigen::AngleAxisd(ping.heading_, Eigen::Vector3d::UnitZ()).matrix();
-            Eigen::Matrix3d Ry = Eigen::AngleAxisd(0.*1.*ping.pitch_, Eigen::Vector3d::UnitY()).matrix();
-            Eigen::Matrix3d Rx = Eigen::AngleAxisd(0.*1.*ping.roll_, Eigen::Vector3d::UnitX()).matrix();
-            Eigen::Matrix3d R = Rx*Ry*Rz;
+            //beam = beam - ping.pos_;
+            //Rz = Eigen::AngleAxisd(-ping.heading_, Eigen::Vector3d::UnitZ()).matrix();
+            beam = Rz.transpose()*(beam - ping.pos_);
+            //Eigen::Matrix3d R = Rx*Ry*Rz;
             beam = ping.pos_ + R*beam; // + Eigen::Vector3d(0., 0., -heave);
         }
     }
 
     return new_pings;
+}
+
+csv_data::csv_asvp_sound_speed::EntriesT convert_sound_speeds(const all_mbes_ping::PingsT& pings)
+{
+    csv_data::csv_asvp_sound_speed sound_speed;
+
+    auto min = std::min_element(pings.begin(), pings.end(), [](const all_mbes_ping& p1, const all_mbes_ping& p2)
+    {
+        return p1.transducer_depth_ < p2.transducer_depth_;
+    });
+
+    auto max = std::max_element(pings.begin(), pings.end(), [](const all_mbes_ping& p1, const all_mbes_ping& p2)
+    {
+        return p1.transducer_depth_ < p2.transducer_depth_;
+    });
+
+    int nbr_bins = 10;
+
+    Eigen::VectorXd dbars = Eigen::VectorXd::Zero(nbr_bins);
+    Eigen::VectorXd vels = Eigen::VectorXd::Zero(nbr_bins);
+    Eigen::VectorXd counts = Eigen::VectorXd::Zero(nbr_bins);
+
+    for (int i = 0; i < nbr_bins; ++i) {
+        dbars[i] = min->transducer_depth_ + double(i)/double(nbr_bins)*(max->transducer_depth_ - min->transducer_depth_);
+    }
+
+    for (const all_mbes_ping& ping : pings) {
+        int index = int(double(nbr_bins) * (ping.transducer_depth_ - min->transducer_depth_) / (max->transducer_depth_ - min->transducer_depth_));
+        vels[index] += ping.sound_vel_;
+        counts[index] += 1.;
+    }
+
+    sound_speed.dbars = dbars;
+    sound_speed.vels = vels.array()/counts.array();
+    sound_speed.time_string_ = pings[0].time_string_;
+    sound_speed.time_stamp_ = pings[0].time_stamp_;
+    sound_speed.lat_ = 0.;
+    sound_speed.long_ = 0.;
+
+    return csv_data::csv_asvp_sound_speed::EntriesT { sound_speed };
 }
 
 } // namespace all_data

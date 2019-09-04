@@ -18,11 +18,15 @@ include(ExternalProject)
 #include_directories(../../libigl/external/glad/include)
 #include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../libigl/external/embree/include)
 #link_directories(${CMAKE_BINARY_DIR}/embree)
+include_directories(${LIBIGL_INCLUDE_DIR})
+include_directories(${EMBREE_INCLUDE_DIRS})
 
 # Add some libraries
 add_library(draw_map src/draw_map.cpp)
 
 add_library(mesh_map src/mesh_map.cpp)
+
+add_library(align_map src/align_map.cpp)
 
 add_library(drape_mesh src/drape_mesh.cpp)
 
@@ -51,6 +55,11 @@ target_include_directories(draw_map PUBLIC
     PRIVATE src)
 
 target_include_directories(mesh_map PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+    PRIVATE src)
+
+target_include_directories(align_map PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
     PRIVATE src)
@@ -101,11 +110,14 @@ target_include_directories(sss_gen_sim PUBLIC
 target_link_libraries(draw_map std_data ${OpenCV_LIBS})
 
 #target_link_libraries(mesh_map std_data igl::embree ${OpenCV_LIBS} glad ${GLFW3_LIBRARY} ${OPENGL_LIBRARY} ${OPENGL_glu_LIBRARY} -lpthread)
-target_link_libraries(mesh_map std_data ${OpenCV_LIBS} igl::core igl::opengl_glfw -lpthread -ltinyxml2) # ${TinyXML2_LIBRARIES})
+target_link_libraries(mesh_map PRIVATE std_data ${OpenCV_LIBS} ${GLFW3_LIBRARY} auvlib_glad -lpthread -ltinyxml2) # ${TinyXML2_LIBRARIES})
 
-target_link_libraries(test_mesh std_data gsf_data xtf_data csv_data navi_data mesh_map draw_map patch_draper ${OpenCV_LIBS} cxxopts)
+target_link_libraries(align_map mesh_map std_data xyz_data ${GLFW3_LIBRARY} auvlib_glad -lpthread) # ${TinyXML2_LIBRARIES})
 
-target_link_libraries(drape_mesh snell_ray_tracing xtf_data igl::embree igl::core igl::opengl_glfw)
+
+target_link_libraries(drape_mesh snell_ray_tracing xtf_data ${GLFW3_LIBRARY} auvlib_glad)
+
+target_link_libraries(test_mesh std_data gsf_data xtf_data csv_data navi_data mesh_map draw_map patch_draper igl::embree ${OpenCV_LIBS} cxxopts)
 
 target_link_libraries(patch_views eigen_cereal ${OpenCV_LIBS})
 
@@ -113,17 +125,17 @@ target_link_libraries(sss_map_image eigen_cereal xtf_data ${OpenCV_LIBS})
 
 target_link_libraries(sss_meas_data eigen_cereal xtf_data ${OpenCV_LIBS})
 
-target_link_libraries(base_draper drape_mesh xtf_data patch_views mesh_map ${OpenCV_LIBS} igl::core igl::opengl_glfw -lpthread)
+target_link_libraries(base_draper drape_mesh xtf_data patch_views mesh_map ${OpenCV_LIBS} ${GLFW3_LIBRARY} auvlib_glad -lpthread)
 
-target_link_libraries(patch_draper drape_mesh base_draper xtf_data patch_views ${OpenCV_LIBS} igl::core igl::opengl_glfw -lpthread)
+target_link_libraries(patch_draper drape_mesh base_draper xtf_data patch_views ${OpenCV_LIBS} ${GLFW3_LIBRARY} auvlib_glad -lpthread)
 
-target_link_libraries(map_draper drape_mesh base_draper xtf_data sss_map_image sss_meas_data ${OpenCV_LIBS} igl::core igl::opengl_glfw -lpthread)
+target_link_libraries(map_draper drape_mesh base_draper xtf_data sss_map_image sss_meas_data ${OpenCV_LIBS} ${GLFW3_LIBRARY} auvlib_glad -lpthread)
 
-target_link_libraries(sss_gen_sim drape_mesh base_draper xtf_data sss_map_image ${OpenCV_LIBS} igl::core igl::opengl_glfw -lpthread ${OpenCV_LIBS})
+target_link_libraries(sss_gen_sim drape_mesh base_draper xtf_data sss_map_image ${OpenCV_LIBS} ${GLFW3_LIBRARY} auvlib_glad -lpthread ${OpenCV_LIBS})
 
 
 # 'make install' to the correct locations (provided by GNUInstallDirs).
-install(TARGETS draw_map mesh_map drape_mesh patch_draper base_draper map_draper patch_views sss_map_image sss_meas_data sss_gen_sim EXPORT BathyMapsConfig
+install(TARGETS draw_map mesh_map align_map drape_mesh patch_draper base_draper map_draper patch_views sss_map_image sss_meas_data sss_gen_sim EXPORT BathyMapsConfig
     ARCHIVE  DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY  DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME  DESTINATION ${CMAKE_INSTALL_BINDIR})  # This is for Windows
@@ -135,4 +147,4 @@ install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(EXPORT BathyMapsConfig DESTINATION share/BathyMaps/cmake)
 
 # This makes the project importable from the build directory
-export(TARGETS draw_map mesh_map drape_mesh patch_draper base_draper map_draper patch_views sss_map_image sss_meas_data sss_gen_sim FILE BathyMapsConfig.cmake)
+export(TARGETS draw_map mesh_map align_map drape_mesh patch_draper base_draper map_draper patch_views sss_map_image sss_meas_data sss_gen_sim FILE BathyMapsConfig.cmake)
