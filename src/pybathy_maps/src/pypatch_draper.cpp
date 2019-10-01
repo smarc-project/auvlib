@@ -27,12 +27,12 @@ PYBIND11_MODULE(patch_draper, m) {
     m.doc() = "Functions for draping a mesh with sidescan data"; // optional module docstring
     py::class_<sss_patch_views>(m, "sss_patch_views", "Class for sidescan views of a patch from different survey lines")
         .def(py::init<>())
-        .def_readwrite("patch_size", &sss_patch_views::patch_size, "Member")
-        .def_readwrite("patch_origin", &sss_patch_views::patch_origin, "Member")
-        .def_readwrite("patch_height", &sss_patch_views::patch_height, "Member")
-        .def_readwrite("sss_views", &sss_patch_views::sss_views, "Member")
-        .def_readwrite("patch_view_pos", &sss_patch_views::patch_view_pos, "Member")
-        .def_readwrite("patch_view_dirs", &sss_patch_views::patch_view_dirs, "Member")
+        .def_readwrite("patch_size", &sss_patch_views::patch_size, "Size of the patch")
+        .def_readwrite("patch_origin", &sss_patch_views::patch_origin, "Origin of patch in map coordinates")
+        .def_readwrite("patch_height", &sss_patch_views::patch_height, "TODO")
+        .def_readwrite("sss_views", &sss_patch_views::sss_views, "Sidescan views of patch")
+        .def_readwrite("patch_view_pos", &sss_patch_views::patch_view_pos, "Positions of views")
+        .def_readwrite("patch_view_dirs", &sss_patch_views::patch_view_dirs, "Directions of views (yaw)")
         .def_static("read_data", &read_data_from_str<sss_patch_views::ViewsT>, "Read sss_patch_views::ViewsT from .cereal file");
 
     py::class_<BaseDraper>(m, "BaseDraper", "Base class for draping sidescan pings onto a bathymetry mesh")
@@ -50,6 +50,7 @@ PYBIND11_MODULE(patch_draper, m) {
                       const xtf_sss_ping::PingsT&, const PatchDraper::BoundsT&,
                       const csv_asvp_sound_speed::EntriesT&>())
         .def("set_sidescan_yaw", &PatchDraper::set_sidescan_yaw, "Set yaw correction of sidescan with respect to nav frame")
+        .def("set_tracing_map_size", &PatchDraper::set_tracing_map_size, "Set size of slice of map where we do ray tracing. Smaller makes it faster but you might cut off valid sidescan angles")
         .def("set_ray_tracing_enabled", &PatchDraper::set_ray_tracing_enabled, "Set if ray tracing through water layers should be enabled. Takes more time but is recommended if there are large speed differences")
         .def("set_vehicle_mesh", &PatchDraper::set_vehicle_mesh, "Provide the viewer with a vehicle model, purely for visualization")
         .def("show", &PatchDraper::show, "Start the draping, and show the visualizer")

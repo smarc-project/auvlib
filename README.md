@@ -1,6 +1,7 @@
 # auvlib
 
 [![Build Status](https://travis-ci.org/nilsbore/auvlib.svg?branch=master)](https://travis-ci.org/nilsbore/auvlib)
+[![Build status](https://ci.appveyor.com/api/projects/status/kcfxp0jlpwqxt2fs/branch/master?svg=true)](https://ci.appveyor.com/project/nilsbore/auvlib/branch/master)
 [![license](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 
 Tools for reading AUV deployment data files and for
@@ -10,20 +11,29 @@ Extensive documentation for the python API is available
 
 ![Draping example](https://github.com/nilsbore/auvlib/raw/master/data/draping_example.png)
 
+To use auvlib on Linux, it is recommended to build the library on your machine (see the following sections).
+On Windows, it is instead recommended to use the pre-compiled statically linked python
+libraries. See the [releases page](https://github.com/nilsbore/auvlib/releases) for details
+on how to install and use the latest release.
+
 ## Dependencies
 
 auvlib has been tested on Ubuntu 16.04 and 18.04.
-On Ubuntu 16.04, use the following command to install all dependencies:
+On Ubuntu 16.04 and 18.04, use the following command to install all dependencies:
 ```
-sudo apt-get install libcereal-dev libglfw3-dev libceres-dev libtinyxml2-dev
+sudo apt-get install libcereal-dev libglfw3-dev libtinyxml2-dev libboost-all-dev libopencv-dev xorg-dev
 ```
-
 ## Building
 
 Once cloned, you need to get the libigl submodule and some of its dependencies:
 ```
 git submodule update --init
 ```
+
+**NOTE:** On 18.04 you currently also need to provide the flags
+`-DAUVLIB_USE_LIBIGL_TINYXML=ON -DAUVLIB_USE_LIBIGL_GLFW=ON` to cmake below.
+In that case, ignore the error about the `tinyxml2` and `glfw` targets not being in the export set;
+build files are still generated properly.
 
 When done, create a `build` folder in the repo root, and run
 ```
@@ -121,3 +131,9 @@ For more complete documentation on C++ library usage, see [the overview document
 * [@dawierha](https://github.com/dawierha)
 * [@ignaciotb](https://github.com/ignaciotb)
 * [@xyp8023](https://github.com/xyp8023)
+
+## Acknowledgements
+
+This work was supported by Stiftelsen för Strategisk Forskning (SSF)
+through the Swedish Maritime Robotics Centre (SMaRC) (IRC15-0046).
+See [the SMARC website](https://smarc.se/) for details.
