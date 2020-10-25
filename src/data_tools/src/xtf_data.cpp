@@ -125,6 +125,8 @@ xtf_sss_ping process_side_scan_ping(XTFPINGHEADER *PingHeader, XTFFILEHEADER *XT
    ping.pos_ = Eigen::Vector3d(easting, northing, -PingHeader->SensorDepth);
    ping.heading_ = M_PI/180.*PingHeader->SensorHeading;
    ping.heading_ = 0.5*M_PI-ping.heading_; // TODO: need to keep this for old data
+   ping.roll_ = M_PI/180.*PingHeader->SensorRoll;
+   ping.pitch_ =  M_PI/180.*PingHeader->SensorPitch;
    ping.sound_vel_ = PingHeader->SoundVelocity;
 
    boost::posix_time::ptime data_time(boost::gregorian::date(PingHeader->Year, PingHeader->Month, PingHeader->Day), boost::posix_time::hours(PingHeader->Hour)+boost::posix_time::minutes(PingHeader->Minute)+boost::posix_time::seconds(PingHeader->Second)+boost::posix_time::milliseconds(10*int(PingHeader->HSeconds))); 
@@ -385,7 +387,11 @@ xtf_sss_ping::PingsT parse_file(const boost::filesystem::path& file)
          return pings;
    }
 
+#ifdef _MSC_VER
+   int infl = open(file.string().c_str(), O_RDONLY | O_BINARY, 0000200);
+#else
    int infl = open(file.string().c_str(), O_RDONLY, 0000200);
+#endif
    if (infl <= 0) {
        cout << "Error: Can't open " << file.string() << " for reading!" << endl;
        return pings;
